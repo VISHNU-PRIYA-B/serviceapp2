@@ -1,0 +1,178 @@
+import React, { useContext, useState } from "react";
+import {View,Text,TextInput,TouchableOpacity,StyleSheet,Alert,} from "react-native";
+import { useNavigation } from "@react-navigation/native";
+import { UserContext } from "../components/ui/UserContext";
+import { fetchCurrentUser, signupUser } from "@/services/auth";
+import { setAuthToken } from "@/services/api";
+
+export default function Signup() {
+  const { setUser, setToken } = useContext(UserContext);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [companyName,setCompanyName] = useState("");
+
+  const navigation = useNavigation<any>();
+
+  const handleSignup = async () => {
+    if (!email.trim() || !password.trim() || !name.trim() || !companyName.trim()) {
+      Alert.alert("Error", "Please fill all fields");
+      return;
+    }
+
+      // Email format validation here
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!emailRegex.test(email)) {
+      Alert.alert(
+        "Invalid Email",
+        "Please enter a valid email address like example@gmail.com"
+      );
+      return;
+    }
+
+    try {
+      const result = await signupUser(email, password, name, companyName);
+
+      if (result.success && result.token) {
+        setToken(result.token);
+        setAuthToken(result.token);
+
+        const user = await fetchCurrentUser(result.token);
+        setUser(user);
+
+        Alert.alert("Success", "Signup successful!");
+        navigation.navigate("Login");
+      } else {
+        Alert.alert("Signup failed", result.message || "Unknown error");
+      }
+    } catch (error) {
+      Alert.alert("Error", "An error occurred during signup");
+      console.error(error);
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.card}>
+        <Text style={styles.heading}>Create Account ✨</Text>
+        <Text style={styles.subHeading}>Join us today</Text>
+
+        <TextInput
+          style={styles.input}
+          placeholder="Full Name"
+          placeholderTextColor="#888"
+          value={name}
+          onChangeText={setName}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Company Name"
+          placeholderTextColor="#888"
+          value={companyName}
+          onChangeText={setCompanyName}
+        />
+
+        <TextInput
+          style={styles.input}
+          placeholder="Email Address"
+          placeholderTextColor="#888"
+          keyboardType="email-address"
+          autoCapitalize="none"
+          value={email}
+          onChangeText={setEmail}
+        />
+
+        <TextInput
+          style={styles.input}
+          placeholder="Password"
+          placeholderTextColor="#888"
+          secureTextEntry
+          value={password}
+          onChangeText={setPassword}
+        />
+
+        <TouchableOpacity style={styles.button} onPress={handleSignup}>
+          <Text style={styles.buttonText}>Sign Up</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={() => navigation.navigate("Login")}
+          style={{ marginTop: 15 }}
+        >
+          <Text style={styles.loginLink}>
+            Already have an account? <Text style={styles.linkBold}>Login</Text>
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#F4F8FF",
+    justifyContent: "center",
+    padding: 20,
+  },
+
+  card: {
+    backgroundColor: "#FFFFFF",
+    padding: 30,
+    borderRadius: 20,
+    elevation: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+  },
+
+  heading: {
+    fontSize: 28,
+    fontWeight: "800",
+    color: "#1A1A1A",
+    textAlign: "center",
+  },
+
+  subHeading: {
+    fontSize: 14,
+    color: "#666",
+    textAlign: "center",
+    marginBottom: 25,
+  },
+
+  input: {
+    backgroundColor: "#F3F6FA",
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 16,
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: "#E5E8EF",
+  },
+
+  button: {
+    backgroundColor: "#2D8CFF",
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    marginTop: 10,
+  },
+
+  buttonText: {
+    color: "#FFF",
+    fontSize: 17,
+    fontWeight: "700",
+  },
+
+  loginLink: {
+    textAlign: "center",
+    fontSize: 14,
+    color: "#444",
+  },
+
+  linkBold: {
+    color: "#2D8CFF",
+    fontWeight: "700",
+  },
+});
