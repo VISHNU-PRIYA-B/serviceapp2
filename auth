@@ -1,0 +1,103 @@
+import { graphqlRequest, setAuthToken} from "./api";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+export { setAuthToken };
+
+export const fetchCurrentUser = async(token?:string) =>{
+    const query = `
+    query{
+    currentUser{
+    id
+    email
+    
+    companyName
+    name
+    profilePic
+    customer
+    admin
+    }
+    }
+    `;
+    try{
+        const data = await graphqlRequest(query,{},token);
+        return data?.currentUser || null;
+     }
+     catch(error){
+        console.error("Error fetching user",error);
+        return null;
+     }
+};
+
+// Signup
+export const signupUser = async (email: string, password: string, name: string, companyName:string) => {
+    // ✅ Email validation here
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  if (!emailRegex.test(email)) {
+    return {
+      success: false,
+      message: "Invalid email format. Example: name@gmail.com",
+    };
+  }
+  const SIGNUP_MUTATION = `
+    mutation CreateUser($email: String!, $password: String!, $name: String!,$companyName:String!) {
+      createUser(email: $email, password: $password, name: $name,companyName:$companyName) {
+        user { id email name companyName}
+        token
+        success
+        message
+      }
+    }
+  `;
+  try {
+    const data = await graphqlRequest(SIGNUP_MUTATION, { email, password, name,companyName });
+    const result = data?.createUser;
+    if (result?.success) return { success: true, token: result.token, user: result.user };
+    return { success: false, message: result?.message || "Signup failed" };
+  } catch (error) {
+    console.error("Signup error:", error);
+    return { success: false, message: "Something went wrong" };
+  }
+};
+
+// Login
+export const loginUser = async (email: string, password: string) => {
+  const LOGIN_MUTATION = `
+    mutation CustomTokenAuth($email: String!, $password: String!) {
+      customTokenAuth(email: $email, password: $password) {
+        token
+        user{
+        id
+        email
+        role
+        customer
+        admin
+        }
+      }
+    }
+  `;
+  try {
+    const data = await graphqlRequest(LOGIN_MUTATION, { email, password });
+    if (!data?.customTokenAuth) {
+      throw new Error("ACCOUNT_NOT_FOUND"); // special message
+    }
+    const token = data?.customTokenAuth?.token;
+    const user = data?.customTokenAuth?.user;
+    if (!token || !user) {
+      throw new Error ("Invalid email or password");
+    }
+    setAuthToken(token);
+    await AsyncStorage.setItem("token", token);
+    return {token, user };
+  } catch (error:any) {
+    if(error.message === "ACCOUNT_NOT_FOUND"){
+      throw new Error("Accountt doesn't exist.Please sign up");
+    }
+    if (error.message === "INVALID_CREDENTIALS") {
+      throw new Error("Invalid email or password");
+    }
+    throw new Error("Account doesn't exist.Please sign up");
+  }
+};
+
+
