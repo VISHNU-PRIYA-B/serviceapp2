@@ -1,0 +1,144 @@
+// screens/LoginScreen.tsx
+import React, { useState, useContext } from "react";
+import {View,Text,TextInput,Alert,TouchableOpacity,StyleSheet,} from "react-native";
+import { UserContext } from "../components/ui/UserContext";
+import { loginUser } from "../services/auth";
+import { useNavigation } from "@react-navigation/native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { fetchCurrentUser } from "../services/auth";
+
+export default function Login() {
+  const { login } = useContext(UserContext);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const navigation = useNavigation<any>();
+
+const handleLogin = async () => {
+  try {
+    const result = await loginUser(email, password);
+    console.log("LOGIN RESULT:", result);
+
+    await login(result.token, result.user);
+
+    // Reset navigation so old screens don't keep stale context
+    navigation.reset({
+      index: 0,
+      routes: [{ name: "Profile" }],
+    });
+  } catch (err: any) {
+    Alert.alert("Login Failed", err.message);
+  }
+};
+
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.card}>
+        <Text style={styles.heading}>Welcome Back 👋</Text>
+        <Text style={styles.subHeading}>Login to continue</Text>
+
+        <TextInput
+          placeholder="Email"
+          placeholderTextColor="#999"
+          style={styles.input}
+          value={email}
+          onChangeText={setEmail}
+        />
+
+        <TextInput
+          placeholder="Password"
+          placeholderTextColor="#999"
+          secureTextEntry
+          style={styles.input}
+          value={password}
+          onChangeText={setPassword}
+        />
+
+        <TouchableOpacity style={styles.button} onPress={handleLogin}>
+          <Text style={styles.buttonText}>Login</Text>
+        </TouchableOpacity>
+
+        <View style={styles.signupContainer}>
+          <Text style={styles.signupText}>New user?</Text>
+          <TouchableOpacity onPress={() => navigation.navigate("Signup")}>
+            <Text style={styles.signupLink}> Sign up</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#F4F8FF",
+    justifyContent: "center",
+    padding: 20,
+  },
+
+  card: {
+    backgroundColor: "white",
+    padding: 30,
+    borderRadius: 20,
+    elevation: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+  },
+
+  heading: {
+    fontSize: 28,
+    fontWeight: "800",
+    color: "#1A1A1A",
+    textAlign: "center",
+  },
+
+  subHeading: {
+    fontSize: 14,
+    color: "#555",
+    marginBottom: 25,
+    textAlign: "center",
+  },
+
+  input: {
+    backgroundColor: "#F3F6FA",
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 16,
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: "#E5E8EF",
+  },
+
+  button: {
+    backgroundColor: "#3ff7baff",
+    paddingVertical: 14,
+    borderRadius: 12,
+    marginTop: 10,
+    alignItems: "center",
+  },
+
+  buttonText: {
+    color: "black",
+    fontSize: 17,
+    fontWeight: "600",
+  },
+
+  signupContainer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    marginTop: 18,
+  },
+
+  signupText: {
+    fontSize: 14,
+    color: "#555",
+  },
+
+  signupLink: {
+    fontSize: 14,
+    color: "#2D8CFF",
+    fontWeight: "700",
+  },
+});
