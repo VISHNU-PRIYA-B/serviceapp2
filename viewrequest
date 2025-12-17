@@ -1,0 +1,355 @@
+// @ts-nocheck
+import React, { useState, useContext, useCallback } from "react";
+import {View,Text,ScrollView,TouchableOpacity,ActivityIndicator,StyleSheet,} from "react-native";
+import { useNavigation, useFocusEffect } from "@react-navigation/native";
+import { graphqlRequest } from "../services/api";
+import { UserContext } from "../components/ui/UserContext";
+
+/* COLORS*/
+const COLORS = {
+  background: "black",
+  white: "#FFFFFF",
+  primary: "#7B6EF6",
+  accent: "#C7F36B",
+  textDark: "#1E1E1E",
+  textMuted: "#8A8A8A",
+
+  pending: "#FFF3CD",
+  started: "#DFF5E1",
+  repairing: "#CCE4FF",
+  testing: "#CFF4FC",
+  ready: "#E5D9F2",
+  rejected: "#F8D7DA",
+};
+
+/* GRAPHQL */
+const ALL_REQUESTS_QUERY = `
+  query {
+    allRequests {
+      requestId
+      itemName
+      problemDescription
+      contactInfo
+      createdAt
+      status
+    }
+  }
+`;
+
+const MY_REQUESTS_QUERY = `
+  query {
+    myRequests {
+      requestId
+      itemName
+      problemDescription
+      contactInfo
+      createdAt
+      status
+    }
+  }
+`;
+
+export default function ViewRequest() {
+  const { user, loading: authLoading } = useContext(UserContext);
+  const navigation = useNavigation();
+
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  /* ================= LOAD REQUESTS ================= */
+  const loadRequests = async () => {
+    try {
+      if (!user) return;
+
+      setLoading(true);
+      const query = user.admin ? ALL_REQUESTS_QUERY : MY_REQUESTS_QUERY;
+      const res = await graphqlRequest(query);
+
+      const data = user.admin
+        ? res?.allRequests || res?.data?.allRequests
+        : res?.myRequests || res?.data?.myRequests;
+
+      setRequests((data || []).filter(Boolean));
+    } catch (err) {
+      console.log("Error loading requests:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+ 
+  useFocusEffect(
+    useCallback(() => {
+      if (!authLoading && user) {
+        loadRequests();
+      }
+    }, [authLoading, user])
+  );
+
+
+  if (authLoading || loading) {
+    return <ActivityIndicator size="large" style={{ marginTop: 40 }} />;
+  }
+
+  if (!user) {
+    return (
+      <Text style={{ marginTop: 40, textAlign: "center" }}>
+        User not loaded
+      </Text>
+    );
+  }
+
+  /* GROUP BY DATE */
+  const groupedData = requests.reduce((acc, item) => {
+    const date = new Date(item.createdAt).toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+    if (!acc[date]) acc[date] = [];
+    acc[date].push(item);
+    return acc;
+  }, {});
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case "PENDING":
+        return COLORS.pending;
+      case "STARTED":
+        return COLORS.started;
+      case "REPAIRING":
+        return COLORS.repairing;
+      case "TESTING":
+        return COLORS.testing;
+      case "READY_TO_DELIVER":
+        return COLORS.ready;
+      case "REJECTED":
+        return COLORS.rejected;
+      default:
+        return "#EEE";
+    }
+  };
+
+  /* UI*/
+  return (
+    <ScrollView style={styles.container}>
+      {Object.keys(groupedData).map((date) => (
+        <View key={date} style={{ marginBottom: 26 }}>
+          <Text style={styles.dateHeader}>{date}</Text>
+
+          {groupedData[date].map((req) => (
+            <View key={req.requestId} style={styles.cardOuter}>
+              <View style={styles.cardInner}>
+                
+                <View style={styles.headerRow}>
+                  <Text style={styles.title}>{req.itemName}</Text>
+
+                  <View
+                    style={[
+                      styles.statusBadge,
+                      { backgroundColor: getStatusColor(req.status) },
+                    ]}
+                  >
+                    <Text style={styles.statusText}>
+                      {req.status.replaceAll("_", " ")}
+                    </Text>
+                  </View>
+                </View>
+
+                
+                <Text style={styles.muted}>
+                  Request ID: {req.requestId}
+                </Text>
+
+               
+                <View style={styles.problemBox}>
+                  <Text style={styles.problemText}>
+                    {req.problemDescription}
+                  </Text>
+                </View>
+
+                <View style={styles.contactRow}>
+                  <Text style={styles.contactIcon}>📞</Text>
+                  <Text style={styles.contactText}>
+                    {req.contactInfo}
+                  </Text>
+                </View>
+
+                <View style={styles.buttonRow}>
+                  {user.customer && (
+                    <TouchableOpacity
+                      style={styles.primaryButton}
+                      onPress={() =>
+                        navigation.navigate("UpdateStatus", {
+                          requestId: req.requestId,
+                        })
+                      }
+                    >
+                      <Text style={styles.primaryText}>View Status</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {user.admin && (
+                    <>
+                      <TouchableOpacity
+                        style={styles.accentButton}
+                        onPress={() =>
+                          navigation.navigate("AddEstimation", {
+                            requestId: req.requestId,
+                          })
+                        }
+                      >
+                        <Text style={styles.accentText}>
+                          Add Estimation
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={styles.accentButton}
+                        onPress={() =>
+                          navigation.navigate("AdminEstimation", {
+                            requestId: req.requestId,
+                          })
+                        }
+                      >
+                        <Text style={styles.accentText}>
+                          Admin Estimation
+                        </Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+                </View>
+              </View>
+            </View>
+          ))}
+        </View>
+      ))}
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+    padding: 16,
+  },
+
+  dateHeader: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: COLORS.textMuted,
+    marginBottom: 10,
+    marginLeft: 6,
+  },
+
+  cardOuter: {
+    marginBottom: 18,
+  },
+
+  cardInner: {
+    backgroundColor: COLORS.white,
+    borderRadius: 22,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: "#ECECF3",
+    shadowColor: "#000",
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+
+  headerRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+
+  title: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: COLORS.textDark,
+    flex: 1,
+    paddingRight: 10,
+  },
+
+  statusBadge: {
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+  },
+
+  statusText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#333",
+  },
+
+  muted: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    marginTop: 6,
+  },
+
+  problemBox: {
+    backgroundColor: "#F7F8FC",
+    borderRadius: 14,
+    padding: 12,
+    marginTop: 10,
+  },
+
+  problemText: {
+    fontSize: 14,
+    color: COLORS.textDark,
+    lineHeight: 20,
+  },
+
+  contactRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 10,
+  },
+
+  contactIcon: {
+    fontSize: 16,
+    marginRight: 6,
+  },
+
+  contactText: {
+    fontSize: 14,
+    color: "#555",
+  },
+
+  buttonRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginTop: 16,
+  },
+
+  primaryButton: {
+    backgroundColor: COLORS.primary,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: 16,
+  },
+
+  primaryText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    textAlign: "center",
+  },
+
+  accentButton: {
+    backgroundColor: COLORS.accent,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: 16,
+  },
+
+  accentText: {
+    color: COLORS.textDark,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+});
