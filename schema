@@ -1,0 +1,10 @@
+import graphene
+import service.schema
+
+class Query(service.schema.Query,graphene.ObjectType):
+    pass
+
+class Mutation(service.schema.Mutation,graphene.ObjectType):
+    pass
+
+schema=graphene.Schema(query=Query,mutation=Mutation)
