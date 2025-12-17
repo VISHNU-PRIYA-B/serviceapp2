@@ -1,0 +1,359 @@
+// @ts-nocheck
+import React, { useContext, useState, useCallback } from "react";
+import {View,Text,TouchableOpacity,Modal,StyleSheet,ScrollView,ActivityIndicator,TextInput,} from "react-native";
+import { graphqlRequest } from "../services/api";
+import { useNavigation, useRoute, useFocusEffect } from "@react-navigation/native";
+import { UserContext } from "../components/ui/UserContext";
+
+const STATUS_FLOW = [
+  "PENDING",
+  "STARTED",
+  "REPAIRING",
+  "TESTING",
+  "READY_TO_DELIVER",
+];
+
+export default function UpdateStatus() {
+  const route = useRoute();
+  const { requestId } = route.params || {};
+  const { user,loading:authLoading } = useContext(UserContext);
+  console.log("USER FROM CONTEXT:", user);
+  console.log("IS ADMIN?:", user?.admin);
+  if (authLoading) {
+    return <ActivityIndicator size="large" style={{ marginTop: 40 }} />;
+}
+
+  const navigation = useNavigation();
+  const isAdmin = user?.admin === true;
+
+  const [dataLoading, setDataLoading] = useState(true);
+  const [repairData, setRepairData] = useState(null);
+
+  const [showStatusModal, setShowStatusModal] = useState(false);
+  const [showDescModal, setShowDescModal] = useState(false);
+  const [selectedStatus, setSelectedStatus] = useState("");
+  const [desc, setDesc] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const loadLatest = async () => {
+    try {
+      setDataLoading(true);
+
+      const QUERY = `
+        query GetRepair($id:String!) {
+          repairRequest(requestId:$id) {
+            requestId
+            status
+            updates {
+              updateStatus
+              description
+              updatedOn
+            }
+          }
+        }
+      `;
+
+      const res = await graphqlRequest(QUERY, { id: requestId });
+      setRepairData(res?.repairRequest);
+    } catch (err) {
+      console.log("Error loading repair:", err);
+    } finally {
+      
+      setDataLoading(false);
+    }
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      if (requestId) {
+        loadLatest();
+      }
+    }, [requestId])
+  );
+
+  const updates = [...(repairData?.updates || [])].sort(
+    (a, b) => new Date(a.updatedOn) - new Date(b.updatedOn)
+  );
+
+  
+  const onSelectStatus = (status) => {
+    setSelectedStatus(status);
+    setShowStatusModal(false);
+    setShowDescModal(true);
+  };
+
+  const submitUpdate = async () => {
+    if (!desc.trim()) {
+      alert("Please enter description");
+      return;
+    }
+
+    setLoading(true);
+
+    const MUTATION = `
+      mutation UpdateRepairStatus(
+        $request_id:String!,
+        $update_status:String!,
+        $description:String!
+      ){
+        updateRepairStatus(
+          requestId:$request_id,
+          updateStatus:$update_status,
+          description:$description
+        ){
+          success
+          message
+          status
+        }
+      }
+    `;
+
+    try {
+      await graphqlRequest(MUTATION, {
+        request_id: requestId,
+        update_status: selectedStatus,
+        description: desc,
+      });
+
+      setShowDescModal(false);
+      setDesc("");
+      setSelectedStatus("");
+
+      loadLatest();
+    } catch (err) {
+      console.log("Update failed:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+
+  return (
+    <ScrollView style={styles.container}>
+      <Text style={styles.heading}>Repair Status</Text>
+
+     
+      {dataLoading ? (
+        <ActivityIndicator size="large" style={{ marginTop: 40 }} />
+      ) : (
+        <>
+          
+          <View style={styles.timelineContainer}>
+            {STATUS_FLOW.map((step, index) => {
+              const update = updates.find((u) => u.updateStatus === step);
+
+              return (
+                <View key={step} style={styles.timelineItem}>
+                  <View
+                    style={[
+                      styles.circle,
+                      update && styles.circleCompleted,
+                    ]}
+                  />
+
+                  {index < STATUS_FLOW.length - 1 && (
+                    <View
+                      style={[
+                        styles.line,
+                        update && styles.lineCompleted,
+                      ]}
+                    />
+                  )}
+
+                  <View style={styles.timelineText}>
+                    <Text style={styles.stepLabel}>
+                      {step.replace(/_/g, " ")}
+                    </Text>
+                    <Text style={styles.stepDescription}>
+                      {update ? update.description : "Awaiting update..."}
+                    </Text>
+                    <Text style={styles.stepDate}>
+                      {update ? update.updatedOn : ""}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+
+          {/* ADMIN BUTTONS */}
+          {isAdmin && (
+            <>
+              <TouchableOpacity
+                style={styles.updateBtn}
+                onPress={() => setShowStatusModal(true)}
+              >
+                <Text style={styles.updateBtnText}>Update Status</Text>
+              </TouchableOpacity>
+
+              {repairData?.status === "READY_TO_DELIVER" && (
+                <TouchableOpacity
+                  style={[
+                    styles.updateBtn,
+                    { backgroundColor: "green", marginTop: 10 },
+                  ]}
+                  onPress={() =>
+                    navigation.navigate("Invoice", {
+                      requestId: repairData.requestId,
+                    })
+                  }
+                >
+                  <Text style={styles.updateBtnText}>Invoice</Text>
+                </TouchableOpacity>
+              )}
+            </>
+          )}
+        </>
+      )}
+
+     
+      <Modal visible={showStatusModal} transparent animationType="slide">
+        <View style={styles.modalBackground}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Select New Status</Text>
+
+            {STATUS_FLOW.map((s) => (
+              <TouchableOpacity
+                key={s}
+                style={styles.modalOption}
+                onPress={() => onSelectStatus(s)}
+              >
+                <Text>{s.replace(/_/g, " ")}</Text>
+              </TouchableOpacity>
+            ))}
+
+            <TouchableOpacity
+              onPress={() => setShowStatusModal(false)}
+              style={styles.cancelButton}
+            >
+              <Text style={styles.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* DESCRIPTION MODAL */}
+      <Modal visible={showDescModal} transparent animationType="slide">
+        <View style={styles.modalBackground}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>
+              Enter Description for {selectedStatus.replace(/_/g, " ")}
+            </Text>
+
+            <TextInput
+              style={styles.input}
+              value={desc}
+              onChangeText={setDesc}
+              placeholder="Enter description"
+            />
+
+            {loading ? (
+              <ActivityIndicator />
+            ) : (
+              <TouchableOpacity
+                style={styles.submitBtn}
+                onPress={submitUpdate}
+              >
+                <Text style={styles.submitText}>Submit Update</Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity
+              onPress={() => setShowDescModal(false)}
+              style={styles.cancelButton}
+            >
+              <Text style={styles.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { padding: 16, backgroundColor: "#fff" },
+  heading: { fontSize: 22, fontWeight: "bold", marginBottom: 15 },
+
+  timelineContainer: { paddingLeft: 30, marginTop: 10 },
+  timelineItem: { minHeight: 100, position: "relative" },
+
+  circle: {
+    position: "absolute",
+    left: 0,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "#fff",
+    borderWidth: 3,
+    borderColor: "#1E90FF",
+    top: 0,
+  },
+  circleCompleted: { backgroundColor: "#1E90FF" },
+
+  line: {
+    position: "absolute",
+    left: 10,
+    top: 22,
+    width: 3,
+    height: "100%",
+    backgroundColor: "#1E90FF33",
+  },
+  lineCompleted: { backgroundColor: "#1E90FF" },
+
+  timelineText: { marginLeft: 40 },
+  stepLabel: { fontSize: 18, fontWeight: "bold" },
+  stepDescription: { color: "#555", marginTop: 3 },
+  stepDate: { color: "gray", marginTop: 4 },
+
+  updateBtn: {
+    backgroundColor: "#4dd7ff",
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 25,
+  },
+  updateBtnText: { textAlign: "center", fontWeight: "bold", fontSize: 16 },
+
+  modalBackground: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.4)",
+  },
+  modalBox: {
+    backgroundColor: "#fff",
+    padding: 20,
+    borderTopLeftRadius: 15,
+    borderTopRightRadius: 15,
+  },
+
+  modalTitle: { fontSize: 18, fontWeight: "bold", marginBottom: 15 },
+  modalOption: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderColor: "#ddd",
+  },
+
+  input: {
+    borderWidth: 1,
+    borderColor: "#ccc",
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 15,
+  },
+
+  submitBtn: {
+    backgroundColor: "green",
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 10,
+  },
+  submitText: { textAlign: "center", color: "#fff", fontWeight: "bold" },
+
+  cancelButton: {
+    marginTop: 10,
+    backgroundColor: "red",
+    padding: 10,
+    borderRadius: 8,
+  },
+  cancelText: { color: "#fff", textAlign: "center", fontWeight: "bold" },
+});
