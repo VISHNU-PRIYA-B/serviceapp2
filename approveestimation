@@ -1,0 +1,227 @@
+// @ts-nocheck
+import React, { useEffect, useState, useContext, useLayoutEffect } from "react";
+import {View,Text,StyleSheet,TouchableOpacity,Alert,ActivityIndicator,Linking,ScrollView,} from "react-native";
+import { graphqlRequest, setAuthToken } from "../services/api";
+import { UserContext } from "../components/ui/UserContext";
+import { useLogout } from "../hooks/Logout";
+import { useNavigation } from "@react-navigation/native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { BACKEND_BASE_URL } from "../services/api";
+
+export default function ApproveEstimation() {
+  const { token: contextToken } = useContext(UserContext);
+  const [estimations, setEstimations] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const logout = useLogout();
+  const navigation = useNavigation();
+
+  /* LOGOUT */
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity onPress={logout} style={{ marginRight: 15 }}>
+          <Text style={{ color: "red", fontWeight: "bold" }}>Logout</Text>
+        </TouchableOpacity>
+      ),
+    });
+  }, []);
+
+  /* FETCH */
+  const fetchMyEstimations = async () => {
+    const token = contextToken || (await AsyncStorage.getItem("token"));
+    if (!token) return;
+
+    setAuthToken(token);
+    setLoading(true);
+
+    const query = `
+      query {
+        myEstimations {
+          id
+          total
+          invoice { pdfUrl }
+          repairRequest {
+            requestId
+            itemName
+            problemDescription
+            createdAt
+            status
+          }
+          items { id description amount }
+        }
+      }
+    `;
+
+    try {
+      const res = await graphqlRequest(query);
+      setEstimations(res?.myEstimations || []);
+    } catch {
+      Alert.alert("Error", "Failed to fetch estimations");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchMyEstimations();
+  }, []);
+
+  /* ACTION */
+  const updateApproval = async (requestId: string, approved: boolean) => {
+    try {
+      const mutation = `
+        mutation {
+          approveEstimation(requestId: "${requestId}", approved: ${approved}) {
+            success
+          }
+        }
+      `;
+      await graphqlRequest(mutation);
+      fetchMyEstimations();
+    } catch {
+      Alert.alert("Error", "Action failed");
+    }
+  };
+
+  /* LOADING */
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" />
+        <Text>Loading...</Text>
+      </View>
+    );
+  }
+
+  if (!estimations.length) {
+    return (
+      <View style={styles.center}>
+        <Text>No estimations found</Text>
+      </View>
+    );
+  }
+
+  /* GROUP BY DATE */
+  const groupedData = estimations.reduce((acc, item) => {
+    const dateKey = new Date(
+      item.repairRequest.createdAt
+    ).toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+
+    if (!acc[dateKey]) acc[dateKey] = [];
+    acc[dateKey].push(item);
+    return acc;
+  }, {});
+
+  /* UI */
+  return (
+    <ScrollView style={{ padding: 20 }}>
+      {Object.keys(groupedData).map((date) => (
+        <View key={date} style={{ marginBottom: 24 }}>
+          <Text style={styles.dateHeader}>{date}</Text>
+
+          {groupedData[date].map((item) => {
+            const total =
+              item.items?.reduce(
+                (s: number, i: any) => s + Number(i.amount),
+                0
+              ) || item.total;
+
+            return (
+              <View key={item.id} style={styles.card}>
+                <Text style={styles.heading}>
+                  {item.repairRequest.itemName}
+                </Text>
+
+                <Text>{item.repairRequest.problemDescription}</Text>
+                <Text>Status: {item.repairRequest.status}</Text>
+
+                {item.items.map((i: any) => (
+                  <View key={i.id} style={styles.row}>
+                    <Text>{i.description}</Text>
+                    <Text>₹{i.amount}</Text>
+                  </View>
+                ))}
+
+                <Text style={styles.totalValue}>Total: ₹{total}</Text>
+
+                {item.repairRequest.status === "PENDING" && (
+                  <View style={styles.buttonContainer}>
+                    <TouchableOpacity
+                      style={styles.acceptButton}
+                      onPress={() =>
+                        updateApproval(item.repairRequest.requestId, true)
+                      }
+                    >
+                      <Text style={styles.buttonText}>Accept</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.rejectButton}
+                      onPress={() =>
+                        updateApproval(item.repairRequest.requestId, false)
+                      }
+                    >
+                      <Text style={styles.buttonText}>Reject</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {item.invoice?.pdfUrl && (
+                  <TouchableOpacity
+                    onPress={() =>
+                      Linking.openURL(
+                        item.invoice.pdfUrl.startsWith("http")
+                          ? item.invoice.pdfUrl
+                          : `${BACKEND_BASE_URL}${item.invoice.pdfUrl}`
+                      )
+                    }
+                  >
+                    <Text style={{ color: "blue", marginTop: 8 }}>
+                      View Invoice
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            );
+          })}
+        </View>
+      ))}
+    </ScrollView>
+  );
+}
+
+/* STYLES */
+const styles = StyleSheet.create({
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+  dateHeader: { fontSize: 14, fontWeight: "600", color: "#888" },
+  card: {
+    backgroundColor: "#fff",
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  heading: { fontSize: 18, fontWeight: "bold" },
+  row: { flexDirection: "row", justifyContent: "space-between" },
+  totalValue: { fontWeight: "bold", marginTop: 6 },
+  buttonContainer: { flexDirection: "row", marginTop: 10 },
+  acceptButton: {
+    backgroundColor: "#27AE60",
+    flex: 1,
+    marginRight: 8,
+    padding: 10,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  rejectButton: {
+    backgroundColor: "#E74C3C",
+    flex: 1,
+    padding: 10,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  buttonText: { color: "#fff", fontWeight: "600" },
+});
