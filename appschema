@@ -1,3 +1,4 @@
+from multiprocessing.util import info
 import graphene
 import django_filters
 import graphql_jwt.shortcuts 
@@ -27,6 +28,7 @@ class UserFilter(django_filters.FilterSet):
 class UserType(DjangoObjectType):
     role = graphene.String()
     profilePic = graphene.String()
+    companyName = graphene.String()
 
     class Meta:
         model = User
@@ -47,6 +49,8 @@ class UserType(DjangoObjectType):
         except:
             return None
         return None
+    def resolve_companyName(self,info):
+        return self.company_name
     
 class CompanyProfileType(DjangoObjectType):
     class Meta:
@@ -166,11 +170,29 @@ class Query(graphene.ObjectType):
     all_requests = graphene.List(RepairRequestType)
     repair_request = graphene.Field(RepairRequestType, request_id=graphene.String(required=True))
 
+    @login_required
     def resolve_all_requests(root, info):
-        return RepairRequest.objects.all().order_by('-created_at')
+        user = info.context.user
+
+        if not user.admin:
+            raise GraphQLError("Not authorized")
+
+        return RepairRequest.objects.filter(
+            created_by=user
+        ).order_by('-created_at')
     
-    def resolve_repair_request(root, info, request_id):
-        return RepairRequest.objects.get(request_id=request_id)
+    @login_required
+    def resolve_repair_request(root, info, request_id):     
+        user = info.context.user
+
+        try:
+            return RepairRequest.objects.get(
+                request_id=request_id,
+                created_by=user
+        )
+        except RepairRequest.DoesNotExist:
+            raise GraphQLError("Repair request not found")
+
     
     my_requests = graphene.List(RepairRequestType)
 
@@ -207,16 +229,15 @@ class Query(graphene.ObjectType):
         if not user.admin:
             raise GraphQLError("You are not authorized")
         try:
-            return Estimation.objects.get(repair_request__request_id=request_id)
+            return Estimation.objects.get(repair_request__request_id=request_id,repair_request__created_by=user)
         except Estimation.DoesNotExist:
             return None
     company_profile = graphene.Field(CompanyProfileType)
-
+    @login_required
     def resolve_company_profile(self, info):
-        return CompanyProfile.objects.first()
-    
+        user = info.context.user
+        return CompanyProfile.objects.filter(user=user).first()
 
-    
 # Mutations
 class CreateUser(graphene.Mutation):
     user = graphene.Field(UserType)
@@ -231,8 +252,8 @@ class CreateUser(graphene.Mutation):
         password = graphene.String(required=True)
 
     def mutate(self, info, email, password, name,company_name):
-                # ❗ Email format validation
-        email_regex = r"^[^\s@]+@[^\s@]+\.[^\s@]+$"
+            
+        email_regex = r"^[^\s@]+@gmail\.com$"
         if not re.match(email_regex, email):
             return CreateUser(
                 success=False,
@@ -240,10 +261,16 @@ class CreateUser(graphene.Mutation):
                 user=None,
                 token=None
             )
+        password_regex = r'^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d@$!%*#?&]{8,}$'
+        if not re.match(password_regex,password):
+            return CreateUser(success=False,message="Password must be at least 8 characters and include letters and numbers",
+                              user = None,
+                              token=None
+                              )
         if User.objects.filter(email=email).exists():
             return CreateUser(success=False, message="Email already registered")
-        # always signup as customer
-        user = User.objects.create_customeruser(email=email, password=password)
+        # always signup as admin
+        user = User.objects.create_adminuser(email=email, password=password)
         user.name = name
         user.company_name = company_name
         user.save()
@@ -330,8 +357,8 @@ class CreateRepairRequest(graphene.Mutation):
     def mutate(cls, root, info, item_name, problem_description, contact_info):
         user = info.context.user
         print("DEBUG USER:", user.email, user.customer, user.admin)
-        if not user.customer:
-            raise GraphQLError("Only customer can create repair request")
+        if not user.admin:
+            raise GraphQLError("Only admin can create repair request")
         # phone number validation
         if not re.fullmatch(r"\d{10}", contact_info):
             raise Exception("Phone number must be 10 digits and contain only numbers.")
@@ -339,7 +366,8 @@ class CreateRepairRequest(graphene.Mutation):
             customer = user,
             item_name=item_name,
             problem_description=problem_description,
-            contact_info=contact_info
+            contact_info=contact_info,
+            created_by=user
             )
         return CreateRepairRequest(repair_request=request)
         
@@ -403,8 +431,8 @@ class ApproveEstimation(graphene.Mutation):
     @login_required
     def mutate(cls, root, info, request_id, approved):
         user = info.context.user
-        if not user.customer:
-            raise GraphQLError("Only customer can approve or reject estimation")
+        if not user.admin:
+            raise GraphQLError("Only admin can approve or reject estimation")
         repair_request = RepairRequest.objects.filter(customer=user,request_id=request_id).first()
         if not repair_request:
             return ApproveEstimation(success=False,message="Repair request not found for this user")
@@ -547,7 +575,7 @@ class CreateOrUpdateCompanyProfile(graphene.Mutation):
         company_name = graphene.String(required=True)
         address = graphene.String(required=True)
         phone = graphene.String(required=True)
-        
+
     company_profile = graphene.Field(CompanyProfileType)
     success = graphene.Boolean()
     message = graphene.String()
@@ -560,42 +588,22 @@ class CreateOrUpdateCompanyProfile(graphene.Mutation):
         if not user.admin:
             raise GraphQLError("Only admin can modify company profile")
 
-        # Fetch the existing company profile (only one allowed)
-        profile = CompanyProfile.objects.first()
+        profile, created = CompanyProfile.objects.update_or_create(
+            user=user,
+            defaults={
+                "owner_name": owner_name,
+                "company_name": company_name,
+                "phone": phone,
+                "address": address,
+                "profile_pic": profile_pic if profile_pic else None,
+            }
+        )
 
-        if profile:
-            # UPDATE EXISTING
-            profile.owner_name = owner_name
-            profile.company_name = company_name
-            profile.phone = phone
-            profile.address = address
-
-            if profile_pic:
-                profile.profile_pic = profile_pic
-
-            profile.save()
-
-            return CreateOrUpdateCompanyProfile(
-                company_profile=profile,
-                success=True,
-                message="Company profile updated successfully"
-            )
-
-        else:
-            # CREATE NEW
-            profile = CompanyProfile.objects.create(
-                owner_name=owner_name,
-                company_name=company_name,
-                address=address,
-                phone=phone,
-                profile_pic=profile_pic,
-            )
-
-            return CreateOrUpdateCompanyProfile(
-                company_profile=profile,
-                success=True,
-                message="Company profile created successfully"
-            )
+        return CreateOrUpdateCompanyProfile(
+            company_profile=profile,
+            success=True,
+            message="Company profile created successfully" if created else "Company profile updated successfully"
+        )
 
 # Root schema
 class Mutation(graphene.ObjectType):
