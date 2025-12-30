@@ -3,6 +3,7 @@ from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, Permis
 from django.utils.crypto import get_random_string
 import django_filters
 from decimal import Decimal
+from django.conf import settings
 
 #Custom User Manager
 class UserManager(BaseUserManager):
@@ -17,8 +18,8 @@ class UserManager(BaseUserManager):
         user.save(using=self._db)
         return user
 
-    def create_customeruser(self, email, password=None):
-        return self.create_user(email, password=password, is_customer=True)
+    def create_adminuser(self, email, password=None):
+        return self.create_user(email, password=password, is_admin=True)
 
     def create_superuser(self, email, password=None):
         return self.create_user(email, password=password, is_admin=True)
@@ -50,6 +51,7 @@ class User(AbstractBaseUser, PermissionsMixin):
         return self.admin
     
 class CompanyProfile(models.Model):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,related_name="company_profile",null=True,blank=True)
     owner_name = models.CharField(max_length=200)
     profile_pic = models.ImageField(upload_to="profile_pics/",blank=True,null=True)
     company_name = models.CharField(max_length=200)
@@ -79,6 +81,8 @@ class RepairRequest(models.Model):
     request_id = models.CharField(max_length=10, unique=True, editable=False, default="")
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default="PENDING")
     created_at = models.DateTimeField(auto_now_add=True)
+
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name="created_requests",null=True,blank=True)
 
     def save(self, *args, **kwargs):
         if not self.request_id:
